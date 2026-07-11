@@ -26,7 +26,8 @@ RUN apt-get update && \
         cpio \
         git \
         gcc \
-        make && \
+        make \
+        libc6-dev && \
     add-apt-repository -y ppa:fex-emu/fex && \
     apt-get update
 
