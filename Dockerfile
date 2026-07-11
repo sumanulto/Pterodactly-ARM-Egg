@@ -23,7 +23,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         software-properties-common \
         gpg-agent \
-        cpio && \
+        cpio \
+        git \
+        gcc \
+        make && \
     add-apt-repository -y ppa:fex-emu/fex && \
     apt-get update
 
@@ -58,6 +61,11 @@ RUN mkdir -p /fex-staging && cd / && \
           [ -d "$dir" ] && find "$dir" -type f ; \
       done ; \
     } | sort -u | cpio -pdmu /fex-staging/ 2>/dev/null && \
+    # Build mcrcon from source (no ARM64 binary exists in releases)
+    git clone --depth 1 --branch v0.7.2 https://github.com/Tiiffi/mcrcon.git /tmp/mcrcon && \
+    cd /tmp/mcrcon && make && \
+    mkdir -p /fex-staging/usr/local/bin && \
+    cp mcrcon /fex-staging/usr/local/bin/mcrcon && \
     tar -czf /fex-artifact.tar.gz -C /fex-staging .
 
 # ==============================================================================
@@ -85,19 +93,13 @@ RUN apt-get update && \
         unzip \
         jq \
         procps \
+        coreutils \
         libstdc++6 && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/*
 
-# Restore FEX-Emu from builder
+# Restore FEX-Emu + mcrcon from builder
 COPY --from=builder /fex-artifact.tar.gz /tmp/fex.tar.gz
 RUN tar -xzf /tmp/fex.tar.gz -C /
-
-# mcrcon — ARM64 native RCON client
-RUN curl -sSL -o /tmp/mcrcon.tar.gz \
-        "https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-linux-arm64.tar.gz" && \
-    tar -xzf /tmp/mcrcon.tar.gz -C /usr/local/bin mcrcon && \
-    chmod +x /usr/local/bin/mcrcon && \
-    rm -f /tmp/mcrcon.tar.gz
 
 # ---- FEX / container environment ----
 ENV HOME=/home/container
