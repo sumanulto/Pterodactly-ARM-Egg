@@ -4,7 +4,7 @@
 #
 # FEX installation uses the OFFICIAL method:
 #   PPA: ppa:fex-emu/fex  (NOT ppa:fex-emu/fex-emu — that is dead)
-#   Packages: fex-emu-armv8.{0,2,4} + fex-emu-binfmt{32,64}
+#   Packages: fex-emu-armv8.{0,2,4} (binfmt not needed — we call FEXInterpreter directly)
 #   Docs: https://github.com/FEX-Emu/FEX#readme
 # ==============================================================================
 
@@ -39,10 +39,10 @@ RUN CPU_FLAGS="$(grep 'Features' /proc/cpuinfo | head -1)" && \
         FEX_PKG="fex-emu-armv8.2"; \
     fi && \
     echo "=== FEX: installing $FEX_PKG ===" && \
-    apt-get install -y --no-install-recommends \
-        "$FEX_PKG" \
-        fex-emu-binfmt32 \
-        fex-emu-binfmt64
+    apt-get install -y --no-install-recommends "$FEX_PKG"
+    # NOTE: fex-emu-binfmt32/64 are intentionally excluded.
+    # Their post-install scripts require systemd-binfmt which doesn't exist in Docker.
+    # We call FEXInterpreter directly so binfmt_misc registration is unnecessary.
 
 # --- Collect every FEX binary, its shared-library deps, and data dirs ---
 RUN mkdir -p /fex-staging && \

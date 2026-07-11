@@ -122,7 +122,7 @@ Oracle Cloud ARM64 (Ampere A1)
   Docker image: ubuntu:22.04 (multi-stage build)
     Builder stage:
       PPA: ppa:fex-emu/fex (official FEX repository)
-      Packages: fex-emu-armv8.{0,2,4} + fex-emu-binfmt{32,64}
+      Packages: fex-emu-armv8.{0,2,4} (binfmt not needed)
       CPU auto-detection selects optimal FEX variant
       Tarball of FEX binaries + shared libs
     Runtime stage:
