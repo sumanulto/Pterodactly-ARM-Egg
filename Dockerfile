@@ -46,15 +46,13 @@ RUN CPU_FLAGS="$(grep 'Features' /proc/cpuinfo | head -1)" && \
     # We call FEXInterpreter directly so binfmt_misc registration is unnecessary.
 
 # --- Collect every FEX binary, its shared-library deps, and data dirs ---
-# Uses cpio for fast bulk copy (preserves paths, no per-file shell forks)
+# Only FEX-specific files from dpkg (no ldd system libs — extracting those
+# into the runtime image overwrites the dynamic linker/libc and breaks /bin/sh)
 RUN mkdir -p /fex-staging && cd / && \
     { \
       for pkg in $(dpkg -l 2>/dev/null | grep '^ii.*fex-emu' | awk '{print $2}'); do \
           dpkg -L "$pkg" 2>/dev/null; \
       done | grep -E '^/' | grep -v '/dpkg\|/doc\|/man\|/share/doc' ; \
-      find /usr/bin -maxdepth 1 -name 'FEX*' -type f 2>/dev/null | \
-          xargs ldd 2>/dev/null | awk '/=>/{print $3}' | sort -u | \
-          grep -v 'not found' ; \
       for dir in /usr/lib/aarch64-linux-gnu/fex-emu /usr/lib/aarch64-linux-gnu/FEX \
                  /usr/lib/fex-emu /usr/share/fex-emu /etc/fex-emu; do \
           [ -d "$dir" ] && find "$dir" -type f ; \
