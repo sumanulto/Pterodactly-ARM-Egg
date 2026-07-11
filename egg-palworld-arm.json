@@ -1,0 +1,156 @@
+{
+    "_comment": "Palworld ARM64 Egg for Oracle Cloud Ampere A1 with FEX-Emu — v2 rewrite",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-07-11T00:00:00+00:00",
+    "name": "Palworld ARM64 (FEX-Emu)",
+    "author": "Community",
+    "description": "Palworld Dedicated Server on ARM64 (Oracle Cloud Ampere A1) using FEX-Emu x86 emulation. Auto-downloads Ubuntu 22.04 RootFS, SteamCMD, and steamclient.so. Zero manual fixes required.",
+    "features": [
+        "steam_disk_space"
+    ],
+    "docker_images": {
+        "FEX-Emu": "palworld-arm-fex:latest"
+    },
+    "file_denylist": [
+        "PalServer.sh"
+    ],
+    "startup": "bash /home/container/start.sh",
+    "config": {
+        "files": "{}",
+        "startup": "{\n    \"done\": \"Setting breakpad minidump AppID = 2394010\"\n}",
+        "logs": "{}",
+        "stop": "shutdown 15"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# =============================================================================\n# Palworld ARM64 — Installation Script\n# Runs inside the Pterodactyl installer container.\n# Server files live at /mnt/server (mapped to /home/container at runtime).\n# =============================================================================\nset -e\n\nexport HOME=/mnt/server\ncd /mnt/server\n\nlog() { echo \"[$(date '+%H:%M:%S')] [INSTALL] $1\"; }\n\nlog \"=============================================\"\nlog \"  Palworld ARM64 — FEX-Emu Installer\"\nlog \"=============================================\"\n\n# --- Verify ARM64 ---\nARCH=$(uname -m)\nif [ \"$ARCH\" != \"aarch64\" ]; then\n    log \"ERROR: This egg requires ARM64 (aarch64). Detected: $ARCH\"\n    exit 1\nfi\nlog \"Architecture: $ARCH OK\"\n\n# =============================================================================\n# 1. Download Ubuntu 22.04 RootFS (fully non-interactive)\n# =============================================================================\nFEX_ROOTFS_DIR=\"${HOME}/.fex-emu/RootFS\"\nFEX_ROOTFS_FILE=\"${FEX_ROOTFS_DIR}/Ubuntu_22_04.sqsh\"\nmkdir -p \"${FEX_ROOTFS_DIR}\"\n\nif [ ! -f \"${FEX_ROOTFS_FILE}\" ] || [ ! -s \"${FEX_ROOTFS_FILE}\" ]; then\n    log \"[1/6] Downloading Ubuntu 22.04 RootFS (non-interactive)...\"\n    export FEX_ROOTFS_PATH=\"${FEX_ROOTFS_DIR}\"\n    FEXRootFSFetcher --assume-yes --as-is --distro-name Ubuntu --distro-version 22.04\n    if [ $? -ne 0 ] || [ ! -f \"${FEX_ROOTFS_FILE}\" ]; then\n        log \"ERROR: RootFS download failed\"\n        exit 1\n    fi\n    log \"RootFS downloaded: $(du -h \"${FEX_ROOTFS_FILE}\" | cut -f1)\"\nelse\n    log \"[1/6] RootFS already exists, skipping\"\nfi\n\n# =============================================================================\n# 2. Generate FEX Config.json (never require manual creation)\n# =============================================================================\nFEX_CONFIG_DIR=\"${HOME}/.fex-emu\"\nFEX_CONFIG=\"${FEX_CONFIG_DIR}/Config.json\"\nmkdir -p \"${FEX_CONFIG_DIR}\"\n\nif [ ! -f \"${FEX_CONFIG}\" ]; then\n    cat > \"${FEX_CONFIG}\" << 'CFGEOF'\n{\n  \"Config\": {\n    \"RootFS\": \"Ubuntu_22_04\"\n  }\n}\nCFGEOF\n    log \"[2/6] Created FEX Config.json\"\nelse\n    CURRENT=$(jq -r '.Config.RootFS // empty' \"${FEX_CONFIG}\" 2>/dev/null)\n    if [ \"${CURRENT}\" != \"Ubuntu_22_04\" ]; then\n        cat > \"${FEX_CONFIG}\" << 'CFGEOF'\n{\n  \"Config\": {\n    \"RootFS\": \"Ubuntu_22_04\"\n  }\n}\nCFGEOF\n        log \"[2/6] Fixed Config.json (was ${CURRENT})\"\n    else\n        log \"[2/6] Config.json OK\"\n    fi\nfi\n\n# =============================================================================\n# 3. Download SteamCMD\n# =============================================================================\nmkdir -p /mnt/server/steamcmd /mnt/server/steamapps\nif [ ! -f /mnt/server/steamcmd/steamcmd.sh ]; then\n    log \"[3/6] Downloading SteamCMD...\"\n    cd /tmp\n    curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\n    tar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd\n    rm -f steamcmd.tar.gz\n    log \"SteamCMD installed\"\nelse\n    log \"[3/6] SteamCMD already exists, skipping\"\nfi\n\n# =============================================================================\n# 4. Install Palworld via SteamCMD under FEX\n# =============================================================================\nlog \"[4/6] Installing Palworld via SteamCMD...\"\nexport FEX_ROOTFS_PATH=\"${FEX_ROOTFS_DIR}\"\ncd /mnt/server/steamcmd\n\nVALIDATE_FLAG=\"\"\nif [ \"${VALIDATE}\" = \"1\" ]; then\n    VALIDATE_FLAG=\"validate\"\n    log \"Validation enabled\"\nfi\n\nFEXInterpreter ./steamcmd.sh \\\n    +force_install_dir /mnt/server \\\n    +login anonymous \\\n    +app_update 2394010 ${VALIDATE_FLAG} \\\n    +quit\n\nif [ $? -ne 0 ]; then\n    log \"ERROR: SteamCMD failed to install Palworld\"\n    exit 1\nfi\nlog \"Palworld installation complete\"\n\n# =============================================================================\n# 5. Copy steamclient.so (fixes SteamAPI_Init missing error)\n# =============================================================================\nlog \"[5/6] Setting up Steam SDK...\"\nmkdir -p /mnt/server/.steam/sdk64\nmkdir -p /mnt/server/.steam/sdk32\ncp -v /mnt/server/steamcmd/linux64/steamclient.so /mnt/server/.steam/sdk64/\ncp -v /mnt/server/steamcmd/linux32/steamclient.so /mnt/server/.steam/sdk32/\n\n# =============================================================================\n# 6. Write runtime scripts (start.sh + config-parser.sh)\n# =============================================================================\nlog \"[6/6] Writing runtime scripts...\"\n\n# ---------- config-parser.sh ----------\ncat > /mnt/server/config-parser.sh << 'CPARSE'\n#!/bin/bash\n# =============================================================================\n# Palworld ARM64 — Config Parser (create + update PalWorldSettings.ini)\n# =============================================================================\nCONFIG_DIR=\"/home/container/Pal/Saved/Config/LinuxServer\"\nCONFIG_FILE=\"${CONFIG_DIR}/PalWorldSettings.ini\"\nmkdir -p \"${CONFIG_DIR}\"\n\nupdate_ini_field() {\n    local file=\"$1\" key=\"$2\" value=\"$3\"\n    if grep -q \"${key}=\" \"$file\" 2>/dev/null; then\n        sed -i -E \"s/(${key}=)(\\\"[^\\\"]*\\\"|[^,)]*)/\\1${value}/g\" \"$file\"\n    else\n        sed -i -E \"s/\\)(\\s*)$/.${key}=${value})\\1/\" \"$file\"\n    fi\n}\n\nif [ ! -f \"${CONFIG_FILE}\" ]; then\n    cat > \"${CONFIG_FILE}\" << 'PEOF'\n[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(Difficulty=None,DayTimeSpeedRate=1.0,NightTimeSpeedRate=1.0,ExpRate=1.0,PalCaptureRate=1.0,PalDamageRateAttack=1.0,PalDamageRateDefense=1.0,PlayerDamageRateAttack=1.0,PlayerDamageRateDefense=1.0,PlayerStomachDecreaseRate=1.0,PlayerStaminaDecreaseRate=1.0,PlayerAutoHPRegenRate=1.0,PlayerAutoHpRegenRateInSleep=1.0,PalStomachDecreaseRate=1.0,PalAutoHPRegenRate=1.0,PalAutoHpRegenRateInSleep=1.0,BuildObjectDamageRate=1.0,BuildObjectDeteriorationDamageRate=1.0,CollectionDropRate=1.0,CollectionObjectHpRate=1.0,CollectionObjectRespawnSpeedRate=1.0,EnemyDropItemRate=1.0,DeathPenalty=All,bEnablePlayerToPlayerPvP=False,bEnablePalTrade=True)\nPEOF\n    echo \"[CONFIG] Created default PalWorldSettings.ini\"\nfi\n\n# Update managed fields from environment (existing custom settings are preserved)\n[ -n \"${SERVER_NAME}\" ] && update_ini_field \"${CONFIG_FILE}\" \"ServerName\" \"\\\"${SERVER_NAME}\\\"\"\n[ -n \"${SERVER_DESCRIPTION}\" ] && update_ini_field \"${CONFIG_FILE}\" \"ServerDescription\" \"\\\"${SERVER_DESCRIPTION}\\\"\"\n[ -n \"${ADMIN_PASSWORD}\" ] && update_ini_field \"${CONFIG_FILE}\" \"AdminPassword\" \"\\\"${ADMIN_PASSWORD}\\\"\"\n[ -n \"${SERVER_PASSWORD}\" ] && update_ini_field \"${CONFIG_FILE}\" \"ServerPassword\" \"\\\"${SERVER_PASSWORD}\\\"\"\n[ -n \"${MAX_PLAYERS}\" ] && update_ini_field \"${CONFIG_FILE}\" \"ServerPlayerMaxNum\" \"${MAX_PLAYERS}\"\n[ -n \"${RCON_PORT}\" ] && update_ini_field \"${CONFIG_FILE}\" \"RCONPort\" \"${RCON_PORT}\"\n[ -n \"${RCON_ENABLE}\" ] && update_ini_field \"${CONFIG_FILE}\" \"RCONEnabled\" \"${RCON_ENABLE}\"\n[ -n \"${SERVER_PORT}\" ] && update_ini_field \"${CONFIG_FILE}\" \"PublicPort\" \"${SERVER_PORT}\"\n[ -n \"${PUBLIC_IP}\" ] && update_ini_field \"${CONFIG_FILE}\" \"PublicIP\" \"\\\"${PUBLIC_IP}\\\"\"\n\necho \"[CONFIG] Config fields updated\"\nCPARSE\nchmod +x /mnt/server/config-parser.sh\n\n# ---------- start.sh ----------\ncat > /mnt/server/start.sh << 'STARTSCRIPT'\n#!/bin/bash\n# =============================================================================\n# Palworld ARM64 — Server Startup Script\n# =============================================================================\nset -e\n\nexport HOME=/home/container\nexport FEX_ROOTFS_PATH=/home/container/.fex-emu/RootFS/\nexport XDG_DATA_HOME=/home/container/.local/share\nexport FEX_APP_DATA_LOCATION=/home/container/.fex-emu\nexport FEX_APP_CONFIG_LOCATION=/home/container/.fex-emu\n\n# ---- Logging ---------------------------------------------------------------\nlog() { echo \"[$(date '+%H:%M:%S')] [START] $1\"; }\n\n# ---- RootFS Auto-Detection -------------------------------------------------\nFEX_ROOTFS_DIR=\"${HOME}/.fex-emu/RootFS\"\nFEX_ROOTFS_FILE=\"\"\n\nif [ -d \"${FEX_ROOTFS_DIR}\" ]; then\n    FEX_ROOTFS_FILE=$(find \"${FEX_ROOTFS_DIR}\" -name \"*.sqsh\" -type f 2>/dev/null | head -1)\nfi\n\nif [ -z \"${FEX_ROOTFS_FILE}\" ] || [ ! -s \"${FEX_ROOTFS_FILE}\" ]; then\n    log \"ERROR: No valid RootFS found in ${FEX_ROOTFS_DIR}\"\n    log \"Please re-run the installation from the panel.\"\n    exit 1\nfi\nlog \"RootFS detected: $(basename \"${FEX_ROOTFS_FILE}\")\"\n\n# ---- RootFS Corruption Recovery ---------------------------------------------\nROOTFS_SIZE=$(stat -c%s \"${FEX_ROOTFS_FILE}\" 2>/dev/null || echo 0)\nif [ \"${ROOTFS_SIZE}\" -lt 104857600 ]; then\n    log \"WARNING: RootFS appears corrupted (${ROOTFS_SIZE} bytes). Re-downloading...\"\n    rm -f \"${FEX_ROOTFS_FILE}\"\n    FEXRootFSFetcher --assume-yes --as-is --distro-name Ubuntu --distro-version 22.04\n    if [ $? -ne 0 ]; then\n        log \"ERROR: RootFS re-download failed\"\n        exit 1\n    fi\n    FEX_ROOTFS_FILE=$(find \"${FEX_ROOTFS_DIR}\" -name \"*.sqsh\" -type f 2>/dev/null | head -1)\n    log \"RootFS re-downloaded: $(basename \"${FEX_ROOTFS_FILE}\")\"\nfi\n\n# ---- Config.json Verification / Auto-fix -----------------------------------\nFEX_CONFIG=\"${HOME}/.fex-emu/Config.json\"\nmkdir -p \"${HOME}/.fex-emu\"\nif [ -f \"${FEX_CONFIG}\" ]; then\n    CURRENT_ROOTFS=$(jq -r '.Config.RootFS // empty' \"${FEX_CONFIG}\" 2>/dev/null)\n    if [ \"${CURRENT_ROOTFS}\" != \"Ubuntu_22_04\" ]; then\n        log \"WARNING: Config.json RootFS is '${CURRENT_ROOTFS}', correcting...\"\n        cat > \"${FEX_CONFIG}\" << 'CFGEOF'\n{\n  \"Config\": {\n    \"RootFS\": \"Ubuntu_22_04\"\n  }\n}\nCFGEOF\n    fi\nelse\n    cat > \"${FEX_CONFIG}\" << 'CFGEOF'\n{\n  \"Config\": {\n    \"RootFS\": \"Ubuntu_22_04\"\n  }\n}\nCFGEOF\n    log \"Config.json created\"\nfi\n\n# ---- Health Check -----------------------------------------------------------\nerrors=0\ncommand -v FEXInterpreter &>/dev/null || { log \"FAIL: FEXInterpreter not found in PATH\"; errors=$((errors+1)); }\n[ -f \"${HOME}/steamcmd/steamcmd.sh\" ] || { log \"FAIL: SteamCMD not found at ${HOME}/steamcmd/steamcmd.sh\"; errors=$((errors+1)); }\n[ -f \"${HOME}/Pal/Binaries/Linux/PalServer-Linux-Shipping\" ] || { log \"FAIL: PalServer executable not found\"; errors=$((errors+1)); }\n[ -d \"${FEX_ROOTFS_DIR}\" ] && [ -n \"$(ls -A \"${FEX_ROOTFS_DIR}\" 2>/dev/null)\" ] || { log \"FAIL: RootFS directory empty\"; errors=$((errors+1)); }\nif [ $errors -gt 0 ]; then\n    log \"ERROR: $errors health check(s) failed. Please re-run installation.\"\n    exit 1\nfi\nlog \"Health check passed\"\n\n# ---- Steam SDK Fix (auto-copy steamclient.so every boot) --------------------\nmkdir -p ~/.steam/sdk64\nmkdir -p ~/.steam/sdk32\nif [ ! -f ~/.steam/sdk64/steamclient.so ]; then\n    cp \"${HOME}/steamcmd/linux64/steamclient.so\" ~/.steam/sdk64/steamclient.so 2>/dev/null && \\\n        log \"steamclient.so copied to sdk64\" || log \"WARNING: sdk64 copy failed\"\nfi\nif [ ! -f ~/.steam/sdk32/steamclient.so ]; then\n    cp \"${HOME}/steamcmd/linux32/steamclient.so\" ~/.steam/sdk32/steamclient.so 2>/dev/null && \\\n        log \"steamclient.so copied to sdk32\" || log \"WARNING: sdk32 copy failed\"\nfi\n\n# ---- Auto Update (if enabled) -----------------------------------------------\nif [ \"${AUTO_UPDATE}\" = \"1\" ]; then\n    log \"Auto-update enabled — checking for Palworld updates...\"\n    cd \"${HOME}/steamcmd\"\n    VALIDATE_FLAG=\"\"\n    if [ \"${VALIDATE}\" = \"1\" ]; then\n        VALIDATE_FLAG=\"validate\"\n        log \"Validation enabled\"\n    fi\n    FEXInterpreter ./steamcmd.sh \\\n        +force_install_dir \"${HOME}\" \\\n        +login anonymous \\\n        +app_update 2394010 ${VALIDATE_FLAG} \\\n        +quit\n    log \"Update check complete\"\n\n    # Re-copy steamclient.so after update\n    cp \"${HOME}/steamcmd/linux64/steamclient.so\" ~/.steam/sdk64/steamclient.so 2>/dev/null || true\n    cp \"${HOME}/steamcmd/linux32/steamclient.so\" ~/.steam/sdk32/steamclient.so 2>/dev/null || true\nfi\n\n# ---- Config Parser (create + update PalWorldSettings.ini) -------------------\nbash \"${HOME}/config-parser.sh\"\n\n# ---- Public IP Auto-Detection -----------------------------------------------\nif [ -z \"${PUBLIC_IP}\" ]; then\n    log \"Detecting public IP...\"\n    PUBLIC_IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || \\\n                curl -s --max-time 5 https://ifconfig.me 2>/dev/null || \\\n                curl -s --max-time 5 https://icanhazip.com 2>/dev/null || \\\n                hostname -I 2>/dev/null | awk '{print $1}' || \\\n                echo \"127.0.0.1\")\n    log \"Public IP detected: ${PUBLIC_IP}\"\nfi\n\n# ---- RCON Helper (background) -----------------------------------------------\nif [ \"${RCON_ENABLE}\" = \"True\" ]; then\n    (\n        while read -r cmd; do\n            mcrcon -s -H \"127.0.0.1\" -P \"${RCON_PORT}\" -p \"${ADMIN_PASSWORD}\" \"$cmd\" 2>/dev/null\n        done\n    ) < /dev/stdin &\n    log \"RCON helper started on port ${RCON_PORT}\"\nfi\n\n# ---- Build Server Launch Command --------------------------------------------\nCMD=(FEXInterpreter \"${HOME}/Pal/Binaries/Linux/PalServer-Linux-Shipping\")\nCMD+=(\"Pal\")\nCMD+=(\"-port=${SERVER_PORT}\")\nCMD+=(\"-publicport=${SERVER_PORT}\")\nCMD+=(\"-servername=${SERVER_NAME}\")\nCMD+=(\"-players=${MAX_PLAYERS}\")\nCMD+=(\"-adminpassword=${ADMIN_PASSWORD}\")\n\nif [ -n \"${PUBLIC_IP}\" ]; then\n    CMD+=(\"-publicip=${PUBLIC_IP}\")\nfi\n\nif [ -n \"${SERVER_PASSWORD}\" ]; then\n    CMD+=(\"-serverpassword=${SERVER_PASSWORD}\")\nfi\n\nif [ -n \"${EXTRA_FLAGS}\" ]; then\n    IFS=' ' read -ra EXTRA_ARR <<< \"${EXTRA_FLAGS}\"\n    CMD+=(\"${EXTRA_ARR[@]}\")\nfi\n\n# ---- Signal Handling for Graceful Shutdown -----------------------------------\ncleanup() {\n    log \"Shutdown signal received...\"\n    kill -TERM \"$SERVER_PID\" 2>/dev/null\n    wait \"$SERVER_PID\" 2>/dev/null\n    log \"Server stopped\"\n    exit 0\n}\ntrap cleanup SIGTERM SIGINT\n\n# ---- Launch Server -----------------------------------------------------------\nlog \"Starting Palworld server...\"\nlog \"Command: ${CMD[*]}\"\n\n\"${CMD[@]}\" &\nSERVER_PID=$!\nwait $SERVER_PID\nEXIT_CODE=$?\n\nlog \"Server exited with code ${EXIT_CODE}\"\nexit ${EXIT_CODE}\nSTARTSCRIPT\nchmod +x /mnt/server/start.sh\n\n# =============================================================================\n# Set Ownership\n# =============================================================================\nif id \"container\" &>/dev/null; then\n    chown -R container:container /mnt/server\nfi\n\n# =============================================================================\n# Post-Install Health Check\n# =============================================================================\nerrors=0\ncommand -v FEXInterpreter &>/dev/null || { log \"FAIL: FEXInterpreter not found in PATH\"; errors=$((errors+1)); }\n[ -f /mnt/server/steamcmd/steamcmd.sh ] || { log \"FAIL: SteamCMD not found\"; errors=$((errors+1)); }\n[ -f /mnt/server/Pal/Binaries/Linux/PalServer-Linux-Shipping ] || { log \"FAIL: PalServer executable not found\"; errors=$((errors+1)); }\n[ -d \"${FEX_ROOTFS_DIR}\" ] && [ -n \"$(ls -A \"${FEX_ROOTFS_DIR}\" 2>/dev/null)\" ] || { log \"FAIL: RootFS not found\"; errors=$((errors+1)); }\n[ -f /mnt/server/.steam/sdk64/steamclient.so ] || { log \"FAIL: steamclient.so not found\"; errors=$((errors+1)); }\n\nif [ $errors -gt 0 ]; then\n    log \"ERROR: $errors health check(s) failed\"\n    exit 1\nfi\nlog \"Health check passed\"\n\nlog \"=============================================\"\nlog \"  Installation complete!\"\nlog \"=============================================\"\n",
+            "container": "palworld-arm-fex:latest",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "App ID",
+            "description": "Steam App ID for Palworld. Do not change.",
+            "env_variable": "SRCDS_APPID",
+            "default_value": "2394010",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "required|string|in:2394010",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto Update",
+            "description": "Automatically check for Palworld updates on server start.",
+            "env_variable": "AUTO_UPDATE",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Validate",
+            "description": "Force SteamCMD file validation on next update. Set to 1 to enable.",
+            "env_variable": "VALIDATE",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Name",
+            "description": "The name of your server as shown in the server browser.",
+            "env_variable": "SERVER_NAME",
+            "default_value": "A Palworld Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:64",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Description",
+            "description": "Description shown in the server browser.",
+            "env_variable": "SERVER_DESCRIPTION",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:128",
+            "field_type": "text"
+        },
+        {
+            "name": "Max Players",
+            "description": "Maximum number of players allowed on the server.",
+            "env_variable": "MAX_PLAYERS",
+            "default_value": "32",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|numeric|between:1,32",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Password",
+            "description": "Password required to join. Leave blank for a public server.",
+            "env_variable": "SERVER_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|alpha_dash|between:1,30",
+            "field_type": "text"
+        },
+        {
+            "name": "Admin Password",
+            "description": "Password for admin commands (in-game chat or RCON).",
+            "env_variable": "ADMIN_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|alpha_dash|between:1,30",
+            "field_type": "text"
+        },
+        {
+            "name": "Public IP",
+            "description": "Your server public IP. Leave blank to auto-detect. Set this if your allocation IP is a private 10.x address (common on Oracle Cloud).",
+            "env_variable": "PUBLIC_IP",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Enable RCON",
+            "description": "Enable RCON for remote server management.",
+            "env_variable": "RCON_ENABLE",
+            "default_value": "True",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:True,False",
+            "field_type": "text"
+        },
+        {
+            "name": "RCON Port",
+            "description": "Port for RCON connections. Set in your allocation.",
+            "env_variable": "RCON_PORT",
+            "default_value": "25575",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|numeric",
+            "field_type": "text"
+        },
+        {
+            "name": "Extra Startup Flags",
+            "description": "Additional command-line flags passed to the server.",
+            "env_variable": "EXTRA_FLAGS",
+            "default_value": "-useperfthreads -NoAsyncLoadingThread -UseMultithreadForDS",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:256",
+            "field_type": "text"
+        }
+    ]
+}
