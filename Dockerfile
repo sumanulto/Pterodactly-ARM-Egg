@@ -92,7 +92,7 @@ RUN apt-get update && \
 
 # Restore FEX-Emu from builder
 COPY --from=builder /fex-artifact.tar.gz /tmp/fex.tar.gz
-RUN tar -xzf /tmp/fex.tar.gz -C / && rm /tmp/fex.tar.gz
+RUN tar -xzf /tmp/fex.tar.gz -C /
 
 # mcrcon — ARM64 native RCON client
 RUN curl -sSL -o /tmp/mcrcon.tar.gz \
