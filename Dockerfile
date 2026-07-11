@@ -22,7 +22,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         software-properties-common \
-        gpg-agent && \
+        gpg-agent \
+        cpio && \
     add-apt-repository -y ppa:fex-emu/fex && \
     apt-get update
 
