@@ -1,9 +1,13 @@
-# Palworld ARM64 Egg (FEX-Emu) — v2
+# Palworld ARM64 Egg (FEX-Emu) — v3
 
 Production-ready Pterodactyl egg for running Palworld Dedicated Server on
 **Oracle Cloud Free Tier (Ampere A1 ARM64)** using FEX-Emu x86 emulation.
 
 Zero manual fixes. Import, create, start.
+
+> **v3 change:** Replaced dead PPA `ppa:fex-emu/fex-emu` with the official
+> `ppa:fex-emu/fex` and correct package names (`fex-emu-armv8.*`).
+> The old PPA no longer publishes packages.
 
 ## What This Egg Does Automatically
 
@@ -115,10 +119,15 @@ Edit via Pterodactyl's File Manager for advanced settings.
 
 ```
 Oracle Cloud ARM64 (Ampere A1)
-  Docker container (Ubuntu 22.04 ARM64)
-    Multi-stage image:
-      Builder:  FEX-Emu PPA → tarball of binaries + libs
-      Runtime:  squashfuse, jq, mcrcon, curl, etc.
+  Docker image: ubuntu:22.04 (multi-stage build)
+    Builder stage:
+      PPA: ppa:fex-emu/fex (official FEX repository)
+      Packages: fex-emu-armv8.{0,2,4} + fex-emu-binfmt{32,64}
+      CPU auto-detection selects optimal FEX variant
+      Tarball of FEX binaries + shared libs
+    Runtime stage:
+      squashfuse, fuse3, jq, mcrcon, curl, etc.
+      FEX tarball extracted from builder
     FEX-Emu (translates x86 → ARM64)
       └── Ubuntu 22.04 x86_64 RootFS (.sqsh, squashfuse-mounted)
     SteamCMD (x86, runs under FEX)
@@ -146,6 +155,8 @@ Oracle Cloud ARM64 (Ampere A1)
 | `Exec format error` | Wrong architecture — rebuild with `--platform linux/arm64` |
 | Slow first boot | Normal — downloading ~30 GB |
 | `RootFS appears corrupted` | Automatic recovery triggers; or re-install |
+| Docker build fails on PPA | Ensure you use `ppa:fex-emu/fex` (NOT `ppa:fex-emu/fex-emu`) |
+| `No package fex-emu-armv8*` | PPA not added correctly; check `apt-cache policy fex-emu-armv8.0` |
 
 ## Egg Import Checklist
 
